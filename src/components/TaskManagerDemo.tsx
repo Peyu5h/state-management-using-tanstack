@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useTaskStore } from "~/state/taskStore";
+import { createGlobalState, createDerivedState } from "~/state/index";
 import {
   Card,
   CardContent,
@@ -20,7 +20,7 @@ import { Checkbox } from "./ui/checkbox";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 
-export interface Task {
+interface Task {
   id: string;
   title: string;
   completed: boolean;
@@ -29,53 +29,111 @@ export interface Task {
   tags: string[];
 }
 
-export interface TaskFilter {
+interface TaskFilter {
   priority: string | null;
   searchTerm: string;
   showCompleted: boolean;
 }
 
-export interface TaskState {
+interface TaskState {
   tasks: Task[];
   filter: TaskFilter;
 }
+
+const useTaskStore = createGlobalState<TaskState>("tasks", {
+  tasks: [],
+  filter: {
+    priority: null,
+    searchTerm: "",
+    showCompleted: true,
+  },
+});
+
+const useFilteredTasks = createDerivedState<TaskState, Task[]>(
+  useTaskStore,
+  (state) =>
+    state.tasks.filter((task) => {
+      const matchesPriority =
+        !state.filter.priority || task.priority === state.filter.priority;
+      const matchesSearch = task.title
+        .toLowerCase()
+        .includes(state.filter.searchTerm.toLowerCase());
+      const matchesCompleted = state.filter.showCompleted || !task.completed;
+      return matchesPriority && matchesSearch && matchesCompleted;
+    }),
+);
+
+interface TaskStats {
+  total: number;
+  completed: number;
+  highPriority: number;
+}
+
+const useTaskStats = createDerivedState<TaskState, TaskStats>(
+  useTaskStore,
+  (state) => ({
+    total: state.tasks.length,
+    completed: state.tasks.filter((t) => t.completed).length,
+    highPriority: state.tasks.filter((t) => t.priority === "high").length,
+  }),
+);
+
 export function TaskManager() {
-  const {
-    state,
-    isLoading,
-    addTask,
-    toggleTask,
-    updateFilter,
-    addTag,
-    deleteTask,
-    getFilteredTasks,
-    getStats,
-  } = useTaskStore();
+  const { data, setState } = useTaskStore();
+  const filteredTasks = useFilteredTasks();
+  const stats = useTaskStats();
 
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskPriority, setNewTaskPriority] =
     useState<Task["priority"]>("medium");
   const [newTag, setNewTag] = useState("");
 
-  const filteredTasks = getFilteredTasks();
-  const stats = getStats();
+  const addTask = (title: string, priority: Task["priority"]) => {
+    setState((state) => {
+      state.tasks.push({
+        id: crypto.randomUUID(),
+        title,
+        priority,
+        completed: false,
+        createdAt: new Date().toISOString(),
+        tags: [],
+      });
+    });
+  };
+
+  const toggleTask = (taskId: string) => {
+    setState((state) => {
+      const task = state.tasks.find((t) => t.id === taskId);
+      if (task) task.completed = !task.completed;
+    });
+  };
+
+  const updateFilter = (filter: Partial<TaskFilter>) => {
+    setState((state) => {
+      Object.assign(state.filter, filter);
+    });
+  };
+
+  const addTag = (taskId: string, tag: string) => {
+    setState((state) => {
+      const task = state.tasks.find((t) => t.id === taskId);
+      if (task) task.tags.push(tag);
+    });
+  };
+
+  const deleteTask = (taskId: string) => {
+    setState((state) => {
+      state.tasks = state.tasks.filter((t) => t.id !== taskId);
+    });
+  };
 
   const handleAddTask = () => {
     if (!newTaskTitle.trim()) return;
 
-    addTask({
-      title: newTaskTitle,
-      completed: false,
-      priority: newTaskPriority,
-      tags: [],
-    });
+    addTask(newTaskTitle, newTaskPriority);
 
     setNewTaskTitle("");
   };
-
-  if (isLoading) {
-    return <div>Loading...</div>;
-  }
 
   return (
     <div className="my-8 space-y-6">
@@ -122,12 +180,12 @@ export function TaskManager() {
             <div className="flex items-center gap-4">
               <Input
                 placeholder="Search tasks..."
-                value={state.filter.searchTerm}
+                value={data.filter.searchTerm}
                 onChange={(e) => updateFilter({ searchTerm: e.target.value })}
                 className="flex-1"
               />
               <Select
-                value={state.filter.priority || "all"}
+                value={data.filter.priority || "all"}
                 onValueChange={(value) =>
                   updateFilter({ priority: value === "all" ? null : value })
                 }
@@ -145,7 +203,7 @@ export function TaskManager() {
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="show-completed"
-                  checked={state.filter.showCompleted}
+                  checked={data.filter.showCompleted}
                   onCheckedChange={(checked) =>
                     updateFilter({ showCompleted: !!checked })
                   }

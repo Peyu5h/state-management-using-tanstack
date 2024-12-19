@@ -15,9 +15,15 @@ interface CartItem extends Product {
   quantity: number;
 }
 
+interface Order {
+  items: CartItem[];
+  total: number;
+  date: string;
+}
+
 interface CartState {
   items: CartItem[];
-  orderHistory: { items: CartItem[]; total: number; date: string }[];
+  orderHistory: Order[];
 }
 
 const PRODUCTS: Product[] = [
@@ -26,91 +32,62 @@ const PRODUCTS: Product[] = [
   { id: 3, name: "Mouse", price: 49 },
 ];
 
-// Create global cart state with persistence
-const useCartState = createGlobalState<CartState>(
-  "shopping-cart",
+const useCartStore = createGlobalState<CartState>(
+  "cart",
   {
     items: [],
     orderHistory: [],
   },
-  {
-    persist: true,
-    actions: {
-      addToCart: (state: CartState, product: Product) => {
-        const existingItem = state.items.find((item) => item.id === product.id);
-
-        if (existingItem) {
-          state.items = state.items.map((item) =>
-            item.id === product.id
-              ? { ...item, quantity: item.quantity + 1 }
-              : item,
-          );
-        } else {
-          state.items.push({ ...product, quantity: 1 });
-        }
-      },
-      removeFromCart: (state: CartState, productId: number) => {
-        state.items = state.items.filter((item) => item.id !== productId);
-      },
-      placeOrder: (state: CartState) => {
-        if (state.items.length === 0) return;
-        state.orderHistory.push({
-          items: [...state.items],
-          total: state.items.reduce(
-            (sum, item) => sum + item.price * item.quantity,
-            0,
-          ),
-          date: new Date().toISOString(),
-        });
-        state.items = [];
-      },
-    } as const,
-    middleware: [
-      (state: CartState) => {
-        console.log("Cart updated:", state);
-      },
-    ],
-  },
+  // {
+  //   persist: true,
+  // },
 );
 
-// Create derived states
-const useCartTotal = createDerivedState(useCartState, (state) =>
-  state.items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+//derived states
+const useCartTotal = createDerivedState<CartState, number>(
+  useCartStore,
+  (state) =>
+    state.items.reduce((sum, item) => sum + item.price * item.quantity, 0),
 );
 
-const useItemCount = createDerivedState(useCartState, (state) =>
-  state.items.reduce((sum, item) => sum + item.quantity, 0),
+const useCartCount = createDerivedState<CartState, number>(
+  useCartStore,
+  (state) => state.items.reduce((sum, item) => sum + item.quantity, 0),
 );
 
 export function ShoppingCartDemo() {
-  const {
-    data: cart,
-    setData: setCart,
-    subscribe,
-    dispatch,
-    setQueryData,
-  } = useCartState();
+  const { data, setState } = useCartStore();
   const total = useCartTotal();
-  const itemCount = useItemCount();
-  const [lastUpdate, setLastUpdate] = useState<string>("");
-
-  useEffect(() => {
-    const unsubscribe = subscribe((state) => {
-      setLastUpdate(new Date().toLocaleTimeString());
-    });
-    return () => unsubscribe();
-  }, [subscribe]);
+  const itemCount = useCartCount();
 
   const addToCart = (product: Product) => {
-    dispatch("addToCart", product);
+    setState((state) => {
+      const existing = state.items.find((item) => item.id === product.id);
+      if (existing) {
+        existing.quantity++;
+      } else {
+        state.items.push({ ...product, quantity: 1 });
+      }
+    });
   };
 
   const removeFromCart = (productId: number) => {
-    dispatch("removeFromCart", productId);
+    setState((state) => {
+      state.items = state.items.filter((item) => item.id !== productId);
+    });
   };
 
   const placeOrder = () => {
-    dispatch("placeOrder");
+    setState((state) => {
+      if (state.items.length === 0) return;
+
+      state.orderHistory.push({
+        items: [...state.items],
+        total,
+        date: new Date().toISOString(),
+      });
+      state.items = [];
+    });
   };
 
   return (
@@ -144,7 +121,7 @@ export function ShoppingCartDemo() {
               Cart ({itemCount} items)
             </h3>
             <div className="space-y-2">
-              {cart.items.map((item) => (
+              {data.items.map((item) => (
                 <div
                   key={item.id}
                   className="flex items-center justify-between rounded bg-secondary p-2"
@@ -164,7 +141,7 @@ export function ShoppingCartDemo() {
                   </div>
                 </div>
               ))}
-              {cart.items.length > 0 && (
+              {data.items.length > 0 && (
                 <div className="flex items-center justify-between pt-4">
                   <span className="font-bold">Total: ${total}</span>
                   <Button onClick={placeOrder}>Place Order</Button>
@@ -177,7 +154,7 @@ export function ShoppingCartDemo() {
           <div>
             <h3 className="mb-2 text-lg font-semibold">Order History</h3>
             <div className="space-y-2">
-              {cart.orderHistory.map((order, index) => (
+              {data.orderHistory.map((order, index) => (
                 <Card key={index}>
                   <CardContent className="p-4">
                     <div>Date: {new Date(order.date).toLocaleDateString()}</div>
@@ -187,11 +164,6 @@ export function ShoppingCartDemo() {
                 </Card>
               ))}
             </div>
-          </div>
-
-          {/* State Updates Info */}
-          <div className="text-sm text-muted-foreground">
-            Last Update: {lastUpdate}
           </div>
         </CardContent>
       </Card>
